@@ -1,0 +1,23 @@
+{
+  "name": "bybitparser",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "bun run --watch index.ts",
+    "test": "bun test --watch",
+    "start": "bun run start-sync-service.js"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.5.0",
+    "axios": "^1.8.4",
+    "crypto": "^1.0.1",
+    "prisma": "^6.5.0"
+  }
+}

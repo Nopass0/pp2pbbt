@@ -1,0 +1,635 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Admin {
+  id         Int      @id @default(autoincrement())
+  telegramId String   @unique
+  username   String?
+  firstName  String?
+  lastName   String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime
+}
+
+model AuditLog {
+  id            Int          @id @default(autoincrement())
+  entityType    String
+  entityId      Int
+  action        AuditAction
+  userId        Int
+  timestamp     DateTime     @default(now())
+  oldValue      Json?
+  newValue      Json?
+  cardBalanceId Int?
+  cardId        Int?
+  cardPouringId Int?
+  CardBalance   CardBalance? @relation(fields: [cardBalanceId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  Card          Card?        @relation(fields: [cardId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  CardPouring   CardPouring? @relation(fields: [cardPouringId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  User          User         @relation(fields: [userId], references: [id])
+
+  @@index([cardBalanceId])
+  @@index([cardId])
+  @@index([cardPouringId])
+  @@index([entityType, entityId])
+  @@index([userId])
+}
+
+model BalanceEntry {
+  id        Int           @id @default(autoincrement())
+  date      DateTime
+  time      String
+  amount    Float
+  currency  String        @default("RUB")
+  comment   String?
+  createdAt DateTime      @default(now())
+  updatedAt DateTime
+  section   SalarySection @default(PAYMENTS)
+}
+
+model BybitMatch {
+  id                 Int              @id @default(autoincrement())
+  idexTransactionId  Int
+  bybitTransactionId Int
+  timeDifference     Int
+  grossExpense       Float
+  grossIncome        Float
+  grossProfit        Float
+  profitPercentage   Float
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime
+  BybitTransaction   BybitTransaction @relation(fields: [bybitTransactionId], references: [id])
+  IdexTransaction    IdexTransaction  @relation(fields: [idexTransactionId], references: [id])
+
+  @@unique([idexTransactionId, bybitTransactionId])
+}
+
+model BybitTransaction {
+  id           Int          @id @default(autoincrement())
+  orderNo      String
+  counterparty String?
+  status       String
+  userId       Int
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime
+  amount       Float
+  asset        String
+  dateTime     DateTime
+  originalData Json?
+  totalPrice   Float
+  type         String
+  unitPrice    Float
+  BybitMatch   BybitMatch[]
+  User         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([orderNo, userId])
+}
+
+model Card {
+  id                  Int           @id @default(autoincrement())
+  externalId          Int
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime
+  provider            String
+  cardNumber          String
+  bank                String
+  phoneNumber         String
+  appPin              Int
+  terminalPin         String
+  comment             String?
+  picachu             String?
+  status              CardStatus    @default(ACTIVE)
+  cardPrice           Float?
+  isPaid              Boolean       @default(false)
+  letterCode          String?
+  actor               String?
+  inWork              Boolean       @default(false)
+  activePaymentMethod String?       @default("c2c")
+  AuditLog            AuditLog[]
+  CardBalance         CardBalance[]
+  CardPouring         CardPouring[]
+}
+
+model CardBalance {
+  id           Int        @id @default(autoincrement())
+  cardId       Int
+  date         DateTime
+  startBalance Float
+  endBalance   Float
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime
+  comment      String?
+  AuditLog     AuditLog[]
+  Card         Card       @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  @@unique([cardId, date])
+}
+
+model CardPouring {
+  id               Int        @id @default(autoincrement())
+  cardId           Int
+  pouringDate      DateTime
+  initialAmount    Float
+  initialDate      DateTime
+  finalAmount      Float?
+  finalDate        DateTime?
+  pouringAmount    Float
+  withdrawalAmount Float?
+  withdrawalDate   DateTime?
+  collectorName    String?
+  status           CardStatus @default(ACTIVE)
+  comment          String?
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime
+  AuditLog         AuditLog[]
+  Card             Card       @relation(fields: [cardId], references: [id], onDelete: Cascade)
+}
+
+model Cell {
+  id              Int       @id @default(autoincrement())
+  rowId           Int
+  columnId        Int
+  value           String?
+  displayValue    String?
+  calculatedValue String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime
+  Column          Column    @relation(fields: [columnId], references: [id], onDelete: Cascade)
+  Row             Row       @relation(fields: [rowId], references: [id], onDelete: Cascade)
+  Comment         Comment[]
+
+  @@unique([rowId, columnId])
+}
+
+model Column {
+  id           Int        @id @default(autoincrement())
+  name         String
+  type         ColumnType
+  tableId      Int
+  width        Int?
+  isRequired   Boolean    @default(false)
+  isFilterable Boolean    @default(false)
+  isSummable   Boolean    @default(false)
+  defaultValue String?
+  format       String?
+  order        Int
+  options      Json?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime
+  Cell         Cell[]
+  Table        Table      @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  Filter       Filter[]
+}
+
+model Comment {
+  id        Int      @id @default(autoincrement())
+  cellId    Int
+  text      String
+  author    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime
+  Cell      Cell     @relation(fields: [cellId], references: [id], onDelete: Cascade)
+}
+
+model Filter {
+  id          Int            @id @default(autoincrement())
+  name        String
+  tableId     Int
+  columnId    Int
+  operator    FilterOperator
+  value       String?
+  secondValue String?
+  isActive    Boolean        @default(true)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime
+  Column      Column         @relation(fields: [columnId], references: [id], onDelete: Cascade)
+  Table       Table          @relation(fields: [tableId], references: [id], onDelete: Cascade)
+}
+
+model FinRow {
+  id            Int             @id @default(autoincrement())
+  date          DateTime
+  time          String
+  shift         String
+  startBalance  Float
+  endBalance    Float
+  employeeId    Int?
+  usdtAmount    Float           @default(0)
+  comment       String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime
+  currency      String          @default("RUB")
+  section       SalarySection   @default(PAYMENTS)
+  exchangeRate  Float?
+  Salary        Salary?         @relation(fields: [employeeId], references: [id])
+  FinRowExpense FinRowExpense[]
+}
+
+model FinRowExpense {
+  id          Int           @id @default(autoincrement())
+  finRowId    Int?
+  expenseType String
+  amount      Float
+  date        DateTime
+  time        String
+  period      String?
+  description String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime
+  currency    String        @default("RUB")
+  section     SalarySection @default(PAYMENTS)
+  FinRow      FinRow?       @relation(fields: [finRowId], references: [id])
+}
+
+model IdexCabinet {
+  id                     Int                      @id @default(autoincrement())
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime
+  idexId                 Int
+  login                  String
+  password               String
+  IdexSyncOrder          IdexSyncOrder[]
+  IdexTransaction        IdexTransaction[]
+  WorkSessionIdexCabinet WorkSessionIdexCabinet[]
+}
+
+model IdexSyncOrder {
+  id          Int                 @id @default(autoincrement())
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime
+  cabinetId   Int?
+  processed   Json?
+  status      IdexSyncOrderStatus
+  startSyncAt DateTime?
+  endSyncAt   DateTime?
+  pages       Int[]
+  IdexCabinet IdexCabinet?        @relation(fields: [cabinetId], references: [id], onDelete: Cascade)
+}
+
+model IdexTransaction {
+  id                Int          @id @default(autoincrement())
+  externalId        BigInt
+  paymentMethodId   BigInt
+  wallet            String
+  amount            Json
+  total             Json
+  status            Int
+  approvedAt        String?
+  expiredAt         String?
+  createdAtExternal String
+  updatedAtExternal String
+  extraData         Json
+  cabinetId         Int
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime
+  BybitMatch        BybitMatch[]
+  IdexCabinet       IdexCabinet  @relation(fields: [cabinetId], references: [id], onDelete: Cascade)
+  Match             Match[]
+
+  @@unique([externalId, cabinetId])
+}
+
+model ImportExport {
+  id        Int      @id @default(autoincrement())
+  tableId   Int
+  name      String
+  type      String
+  mappings  Json
+  options   Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime
+}
+
+model Match {
+  id                Int             @id @default(autoincrement())
+  idexTransactionId Int
+  transactionId     Int
+  timeDifference    Int
+  grossExpense      Float
+  grossIncome       Float
+  grossProfit       Float
+  profitPercentage  Float
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime
+  IdexTransaction   IdexTransaction @relation(fields: [idexTransactionId], references: [id])
+  Transaction       Transaction     @relation(fields: [transactionId], references: [id])
+
+  @@unique([idexTransactionId, transactionId])
+}
+
+model NotificationSettings {
+  id        Int      @id @default(autoincrement())
+  settings  Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime
+}
+
+model Password {
+  id        Int      @id @default(autoincrement())
+  name      String
+  login     String?
+  password  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime
+  comment   String?
+}
+
+model ReportNotification {
+  id               Int       @id @default(autoincrement())
+  notificationTime DateTime
+  reportReceived   Boolean   @default(false)
+  reportTime       DateTime?
+  adminNotified    Boolean   @default(false)
+  adminNotifyTime  DateTime?
+  userId           Int
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime
+  User             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Row {
+  id        Int      @id @default(autoincrement())
+  tableId   Int
+  order     Int
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime
+  Cell      Cell[]
+  Table     Table    @relation(fields: [tableId], references: [id], onDelete: Cascade)
+}
+
+model Salary {
+  id            Int             @id @default(autoincrement())
+  fullName      String
+  position      String
+  startDate     DateTime
+  payday        Int
+  paydayMonth   Int?
+  fixedSalary   Float?
+  isActive      Boolean         @default(true)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime
+  comment       String?
+  periodic      PeriodType      @default(ONCE_MONTH)
+  payday2       Int?
+  payday3       Int?
+  section       SalarySection   @default(PAYMENTS)
+  FinRow        FinRow[]
+  SalaryDebt    SalaryDebt[]
+  SalaryEarning SalaryEarning[]
+  SalaryPayment SalaryPayment[]
+  ShiftReport   ShiftReport[]
+}
+
+model SalaryDebt {
+  id          Int      @id @default(autoincrement())
+  salaryId    Int
+  amount      Float
+  debtDate    DateTime
+  description String?
+  isPaid      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime
+  Salary      Salary   @relation(fields: [salaryId], references: [id], onDelete: Cascade)
+}
+
+model SalaryEarning {
+  id          Int      @id @default(autoincrement())
+  amount      Float
+  earningDate DateTime
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime
+  salaryId    Int
+  Salary      Salary   @relation(fields: [salaryId], references: [id], onDelete: Cascade)
+}
+
+model SalaryPayment {
+  id          Int      @id @default(autoincrement())
+  salaryId    Int
+  amount      Float
+  paymentDate DateTime
+  comment     String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime
+  currency    String   @default("RUB")
+  Salary      Salary   @relation(fields: [salaryId], references: [id])
+}
+
+model Section {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String?
+  slug        String   @unique
+  isActive    Boolean  @default(true)
+  order       Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime
+  Table       Table[]
+}
+
+model ShiftReport {
+  id                 Int                  @id @default(autoincrement())
+  date               DateTime
+  time               String
+  shift              String
+  startBalance       Float
+  endBalance         Float
+  employeeId         Int?
+  usdtAmount         Float                @default(0)
+  currency           String               @default("RUB")
+  comment            String?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime
+  Salary             Salary?              @relation(fields: [employeeId], references: [id])
+  ShiftReportExpense ShiftReportExpense[]
+}
+
+model ShiftReportExpense {
+  id            Int          @id @default(autoincrement())
+  shiftReportId Int?
+  expenseType   String
+  amount        Float
+  currency      String       @default("RUB")
+  date          DateTime
+  time          String
+  period        String?
+  description   String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime
+  ShiftReport   ShiftReport? @relation(fields: [shiftReportId], references: [id])
+}
+
+model SystemSettings {
+  id                     Int      @id @default(autoincrement())
+  reportReminderInterval Int      @default(180)
+  reportWaitTime         Int      @default(10)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime
+}
+
+model Table {
+  id            Int      @id @default(autoincrement())
+  name          String
+  description   String?
+  sectionId     Int
+  isSearchable  Boolean  @default(true)
+  hasPagination Boolean  @default(true)
+  pageSize      Int      @default(10)
+  order         Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime
+  Column        Column[]
+  Filter        Filter[]
+  Row           Row[]
+  Section       Section  @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+}
+
+model TelegramAccount {
+  id         Int      @id @default(autoincrement())
+  telegramId String   @unique
+  username   String?
+  firstName  String?
+  lastName   String?
+  userId     Int
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime
+  User       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Transaction {
+  id           Int      @id @default(autoincrement())
+  externalId   String?
+  orderNo      String?
+  dateTime     DateTime
+  type         String
+  asset        String
+  amount       Float
+  totalPrice   Float
+  unitPrice    Float
+  counterparty String?
+  status       String
+  originalData Json?
+  userId       Int
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime
+  Match        Match[]
+  User         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([externalId, userId])
+}
+
+model User {
+  id                  Int                  @id @default(autoincrement())
+  name                String
+  passCode            String               @unique
+  isActive            Boolean              @default(true)
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime
+  lastNotification    DateTime?
+  role                UserRole             @default(USER)
+  bybitApiSecret      String?
+  bybitApiToken       String?
+  lastBybitSyncAt     DateTime?
+  lastBybitSyncStatus String?
+  AuditLog            AuditLog[]
+  BybitTransaction    BybitTransaction[]
+  ReportNotification  ReportNotification[]
+  TelegramAccount     TelegramAccount[]
+  Transaction         Transaction[]
+  WorkSession         WorkSession[]
+}
+
+model WorkSession {
+  id                     Int                      @id @default(autoincrement())
+  startTime              DateTime
+  endTime                DateTime?
+  duration               Int?
+  autoCompleted          Boolean                  @default(false)
+  userId                 Int
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime
+  comment                String?
+  User                   User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  WorkSessionIdexCabinet WorkSessionIdexCabinet[]
+}
+
+model WorkSessionIdexCabinet {
+  workSessionId Int
+  idexCabinetId Int
+  assignedAt    DateTime    @default(now())
+  IdexCabinet   IdexCabinet @relation(fields: [idexCabinetId], references: [id], onDelete: Cascade)
+  WorkSession   WorkSession @relation(fields: [workSessionId], references: [id], onDelete: Cascade)
+
+  @@id([workSessionId, idexCabinetId])
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+}
+
+enum CardStatus {
+  ACTIVE
+  WARNING
+  BLOCKED
+}
+
+enum ColumnType {
+  TEXT
+  NUMBER
+  DATE
+  DATETIME
+  BOOLEAN
+  SELECT
+  BUTTON
+  CALCULATED
+  CURRENCY
+  LINK
+  COMMENT
+}
+
+enum FilterOperator {
+  EQUALS
+  NOT_EQUALS
+  GREATER_THAN
+  LESS_THAN
+  GREATER_OR_EQUAL
+  LESS_OR_EQUAL
+  CONTAINS
+  NOT_CONTAINS
+  STARTS_WITH
+  ENDS_WITH
+  BETWEEN
+  IN_LIST
+}
+
+enum IdexSyncOrderStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+}
+
+enum PeriodType {
+  TWICE_MONTH
+  THRICE_MONTH
+  ONCE_MONTH
+}
+
+enum SalarySection {
+  PAYMENTS
+  TRACTOR
+}
+
+enum UserRole {
+  USER
+  USERCARDS
+}
