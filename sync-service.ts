@@ -331,9 +331,9 @@ export class BybitSyncService {
                     const type = 'Sell';
                     
                     // Обработка числовых значений
-                    const amount = parseFloat(transaction.amount || '0');
                     const unitPrice = parseFloat(transaction.price || '0');
-                    const totalPrice = amount * unitPrice;
+                    const amount = unitPrice;
+                    const totalPrice = amount;
                     
                     // Имя контрагента
                     const counterparty = transaction.targetNickName || 'Unknown';
@@ -347,6 +347,29 @@ export class BybitSyncService {
                     // Логирование данных для отладки
                     this.log(`Подготовка к сохранению транзакции: orderNo=${orderNo}, date=${dateTime.toISOString()}, type=${type}, amount=${amount}, price=${unitPrice}`);
                     
+                    // Форматируем дату для поля Time в originalData
+                    const formattedDate = dateTime.toISOString()
+                    .replace('T', ' ')
+                    .replace(/\.\d+Z$/, '');
+
+                    // Создаем структуру originalData в требуемом формате
+                    const originalData = {
+                    "Time": formattedDate,
+                    "Type": type.toUpperCase(),
+                    "Price": unitPrice.toString(),
+                    "Status": statusStr,
+                    "Currency": "RUB",
+                    "Order No.": orderNo,
+                    "Currency_1": "RUB",
+                    "Coin Amount": amount.toString(),
+                    "Fiat Amount": totalPrice.toString(),
+                    "p2p-convert": "no",
+                    "Counterparty": counterparty,
+                    "Cryptocurrency": asset,
+                    "Cryptocurrency_1": asset,
+                    "Transaction Fees": "0"
+                    };
+
                     // Создаем новую транзакцию
                     await this.prisma.bybitTransaction.create({
                         data: {
@@ -357,7 +380,7 @@ export class BybitSyncService {
                             amount: amount,
                             asset: asset,
                             dateTime: dateTime,
-                            originalData: transaction,
+                            originalData: originalData,
                             totalPrice: totalPrice,
                             type: type,
                             unitPrice: unitPrice,
