@@ -332,8 +332,8 @@ export class BybitSyncService {
                     
                     // Обработка числовых значений
                     const unitPrice = parseFloat(transaction.price || '0');
-                    const amount = unitPrice;
-                    const totalPrice = amount;
+                    const amount = parseFloat(transaction.amount || '0');
+                    const totalPrice = unitPrice * amount;
                     
                     // Имя контрагента
                     const counterparty = transaction.targetNickName || 'Unknown';
