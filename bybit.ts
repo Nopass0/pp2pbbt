@@ -492,6 +492,71 @@ class BybitP2PParser {
     // Export filtered orders
     return this.exportToMatchingFormat(completedOrders, filepath);
   }
+  
+  /**
+   * Make a request to P2P endpoints including chat messages
+   * @param method - HTTP method (GET or POST)
+   * @param endpoint - API endpoint starting with /
+   * @param params - Request parameters
+   * @returns API response
+   */
+  async p2pRequest(method: 'GET' | 'POST', endpoint: string, params: Record<string, any> = {}): Promise<any> {
+    try {
+      // Ensure time synchronization is complete
+      if (!this.timeSyncComplete) {
+        await this.syncTime();
+      }
+      
+      const timestamp = this.getTimestamp().toString();
+      const recvWindow = this.recvWindow.toString();
+      
+      // Create request configuration
+      const config: any = {
+        method: method,
+        url: `${this.baseUrl}${endpoint}`,
+        headers: {
+          'X-BAPI-API-KEY': this.apiKey,
+          'X-BAPI-TIMESTAMP': timestamp,
+          'X-BAPI-RECV-WINDOW': recvWindow,
+          'Content-Type': 'application/json'
+        }
+      };
+      
+      // For POST requests, add params to request body
+      if (method === 'POST') {
+        const requestBody = JSON.stringify(params);
+        config.data = requestBody;
+        config.headers['X-BAPI-SIGN'] = this.generateSignature(
+          timestamp,
+          method,
+          endpoint,
+          '',
+          requestBody
+        );
+      } else {
+        // For GET requests, add params to query string
+        const queryString = new URLSearchParams(params).toString();
+        config.url = `${config.url}?${queryString}`;
+        config.headers['X-BAPI-SIGN'] = this.generateSignature(
+          timestamp,
+          method,
+          endpoint,
+          queryString
+        );
+      }
+      
+      // Make the request
+      const response = await axios(config);
+      return response.data;
+      
+    } catch (error: any) {
+      console.error(`Error in p2pRequest (${method} ${endpoint}):`, error.message);
+      if (error.response) {
+        console.error('Response data:', error.response.data);
+      }
+      throw error;
+    }
+  }
 }
 
 export default BybitP2PParser;

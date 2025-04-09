@@ -2,6 +2,7 @@ import { PrismaClient } from '@prisma/client';
 import BybitP2PParser from './bybit';
 import * as fs from 'fs';
 import * as path from 'path';
+import axios from 'axios';
 
 /**
  * Сервис синхронизации транзакций Bybit
@@ -128,34 +129,45 @@ export class BybitSyncService {
      * Синхронизация всех пользователей с API ключами Bybit
      */
     private async syncAllUsers(): Promise<void> {
+        const startTime = Date.now();
+        this.log('Запуск синхронизации для всех пользователей');
+        
         try {
-            const startTime = Date.now();
-            this.log(`Начало синхронизации для всех пользователей: ${new Date().toLocaleString()}`);
-            
-            // Получение всех пользователей с API ключами Bybit
+            // Получаем всех активных пользователей с API ключами Bybit
             const users = await this.prisma.user.findMany({
                 where: {
-                    bybitApiToken: { not: null },
-                    bybitApiSecret: { not: null }
+                    isActive: true,
+                    AND: [
+                        { bybitApiToken: { not: null } },
+                        { bybitApiToken: { not: '' } },
+                        { bybitApiSecret: { not: null } },
+                        { bybitApiSecret: { not: '' } }
+                    ]
                 }
             });
             
-            this.log(`Найдено ${users.length} пользователей с API ключами Bybit`);
+            if (users.length === 0) {
+                this.log('Нет активных пользователей с API ключами Bybit');
+                return;
+            }
             
-            // Синхронизация каждого пользователя по очереди
+            this.log(`Найдено ${users.length} пользователей для синхронизации`);
+            
+            // Синхронизация транзакций для каждого пользователя последовательно
             for (const user of users) {
                 try {
                     await this.syncUserTransactions(user);
+                    // Пауза между синхронизацией разных пользователей для снижения нагрузки
+                    await this.sleep(2000);
                 } catch (error: any) {
-                    this.logError(`Ошибка при синхронизации пользователя ${user.id}: ${error.message}`);
-                    // Обновляем статус синхронизации даже в случае ошибки
-                    await this.updateUserSyncStatus(user.id, `Ошибка: ${error.message}`);
+                    this.logError(`Не удалось синхронизировать пользователя ${user.id}: ${error.message}`);
                 }
-                
-                // Небольшая задержка между запросами к API для разных пользователей
-                await this.sleep(1000);
             }
             
+            // После синхронизации всех пользователей обрабатываем неиспользованные транзакции
+            await this.processUnprocessedTransactions();
+            
+            this.log('Синхронизация для всех пользователей завершена');
             const endTime = Date.now();
             const duration = (endTime - startTime) / 1000;
             this.log(`Завершение синхронизации для всех пользователей. Длительность: ${duration.toFixed(2)} сек.`);
@@ -413,6 +425,165 @@ export class BybitSyncService {
         
         const logFile = path.join(this.logDir, `sync-${new Date().toISOString().split('T')[0]}.log`);
         fs.appendFileSync(logFile, errorMessage + '\n');
+    }
+    
+    /**
+     * Обработка непроцессированных транзакций (которые не имеют записи в BybitOrderInfo)
+     * Получает сообщения из чата для каждой транзакции и ищет номера телефонов
+     */
+    private async processUnprocessedTransactions(): Promise<void> {
+        this.log('Запуск обработки непроцессированных транзакций');
+        
+        try {
+            // Находим все транзакции, которые ещё не имеют связанной записи в BybitOrderInfo
+            const unprocessedTransactions = await this.prisma.bybitTransaction.findMany({
+                where: {
+                    BybitOrderInfo: null // Используем null вместо none для отношений один-к-одному
+                },
+                include: {
+                    User: true
+                }
+            });
+            
+            if (unprocessedTransactions.length === 0) {
+                this.log('Непроцессированных транзакций не найдено');
+                return;
+            }
+            
+            this.log(`Найдено ${unprocessedTransactions.length} непроцессированных транзакций`);
+            
+            // Обрабатываем каждую транзакцию последовательно
+            for (const transaction of unprocessedTransactions) {
+                try {
+                    // Проверяем наличие API ключей пользователя
+                    if (!transaction.User.bybitApiToken || !transaction.User.bybitApiSecret) {
+                        this.log(`Пропускаем транзакцию ${transaction.orderNo} - пользователь ${transaction.userId} не имеет API ключей`);
+                        continue;
+                    }
+                    
+                    // Получаем сообщения чата для заявки
+                    const chatMessages = await this.getChatMessages(transaction.orderNo, transaction.User);
+                    
+                    if (!chatMessages || chatMessages.length === 0) {
+                        this.log(`Нет сообщений чата для заявки ${transaction.orderNo}`);
+                        continue;
+                    }
+                    
+                    // Извлекаем номера телефонов из сообщений
+                    const phoneNumbers = this.extractPhoneNumbers(chatMessages);
+                    
+                    if (phoneNumbers.length === 0) {
+                        this.log(`Номера телефонов не найдены в чате заявки ${transaction.orderNo}`);
+                        continue;
+                    }
+                    
+                    // Создаем запись в BybitOrderInfo
+                    await this.prisma.bybitOrderInfo.create({
+                        data: {
+                            orderNo: transaction.orderNo,
+                            userId: transaction.userId,
+                            phoneNumbers: phoneNumbers,
+                            bybitTransactionId: transaction.id // Добавляем связь с транзакцией
+                        }
+                    });
+                    
+                    this.log(`Создана запись в BybitOrderInfo для заявки ${transaction.orderNo} с ${phoneNumbers.length} номерами телефонов`);
+                    
+                    // Пауза между запросами API для снижения нагрузки
+                    await this.sleep(1000);
+                    
+                } catch (error: any) {
+                    this.logError(`Ошибка при обработке транзакции ${transaction.orderNo}: ${error.message}`);
+                }
+            }
+            
+            this.log('Обработка непроцессированных транзакций завершена');
+            
+        } catch (error: any) {
+            this.logError(`Ошибка при обработке непроцессированных транзакций: ${error.message}`);
+        }
+    }
+    
+    /**
+     * Получение сообщений чата для указанной заявки через API Bybit
+     */
+    private async getChatMessages(orderId: string, user: any): Promise<any[]> {
+        try {
+            const parser = new BybitP2PParser(user.bybitApiToken, user.bybitApiSecret);
+            
+            // Параметры запроса к API Bybit
+            const params = {
+                orderId: orderId,
+                size: "100" // Максимальное количество сообщений
+            };
+            
+            // Выполняем запрос к API
+            const response = await parser.p2pRequest('POST', '/v5/p2p/order/message/listpage', params);
+            
+            if (response && response.ret_code === 0 && response.result && Array.isArray(response.result)) {
+                return response.result;
+            }
+            
+            return [];
+            
+        } catch (error: any) {
+            this.logError(`Ошибка при получении сообщений чата для заявки ${orderId}: ${error.message}`);
+            return [];
+        }
+    }
+    
+    /**
+     * Извлечение номеров телефонов из сообщений чата
+     * Поддерживает различные форматы номеров телефонов
+     */
+    private extractPhoneNumbers(messages: any[]): string[] {
+        const phoneNumbers = new Set<string>();
+        
+        // Регулярные выражения для разных форматов номеров телефонов
+        const phonePatterns = [
+            /\+7\s?\(?(\d{3})\)?[\s-]?(\d{3})[\s-]?(\d{2})[\s-]?(\d{2})/g, // +7(999)-999-99-99 или +7 999 999 99 99
+            /\+7\s?(\d{3})(\d{3})(\d{2})(\d{2})/g, // +79999999999
+            /8\s?\(?(\d{3})\)?[\s-]?(\d{3})[\s-]?(\d{2})[\s-]?(\d{2})/g, // 8(999)-999-99-99 или 8 999 999 99 99
+            /8\s?(\d{3})(\d{3})(\d{2})(\d{2})/g, // 89999999999
+            /(\d{3})[\s-]?(\d{3})[\s-]?(\d{2})[\s-]?(\d{2})/g // 999 999 99 99 или 999-999-99-99
+        ];
+        
+        for (const message of messages) {
+            // Проверяем только текстовые сообщения
+            if (message.contentType === 'str' && message.message) {
+                const messageText = message.message.toString();
+                
+                // Проверяем каждый шаблон номера телефона
+                for (const pattern of phonePatterns) {
+                    let match;
+                    while ((match = pattern.exec(messageText)) !== null) {
+                        // Форматируем номер телефона в стандартный формат +7XXXXXXXXXX
+                        let phoneNumber;
+                        
+                        if (match[0].startsWith('+7')) {
+                            // Если номер начинается с +7, извлекаем и форматируем
+                            phoneNumber = `+7${match[1]}${match[2]}${match[3]}${match[4]}`;
+                        } else if (match[0].startsWith('8')) {
+                            // Если номер начинается с 8, заменяем на +7
+                            phoneNumber = `+7${match[1]}${match[2]}${match[3]}${match[4]}`;
+                        } else {
+                            // Если номер без префикса, добавляем +7
+                            phoneNumber = `+7${match[1]}${match[2]}${match[3]}${match[4]}`;
+                        }
+                        
+                        // Удаляем все нецифровые символы, кроме +
+                        phoneNumber = phoneNumber.replace(/[^\d+]/g, '');
+                        
+                        // Проверяем, что номер имеет правильную длину (12 символов для +7XXXXXXXXXX)
+                        if (phoneNumber.length === 12) {
+                            phoneNumbers.add(phoneNumber);
+                        }
+                    }
+                }
+            }
+        }
+        
+        return Array.from(phoneNumbers);
     }
 }
 

@@ -87,8 +87,24 @@ model BybitTransaction {
   unitPrice    Float
   BybitMatch   BybitMatch[]
   User         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  BybitOrderInfo BybitOrderInfo?
 
   @@unique([orderNo, userId])
+}
+
+model BybitOrderInfo {
+  id                 Int      @id @default(autoincrement())
+  phoneNumbers       String[]
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  orderNo            String
+  userId             Int
+  bybitTransactionId Int      @unique
+
+  User            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  BybitTransaction BybitTransaction @relation(fields: [bybitTransactionId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 model Card {
@@ -544,6 +560,7 @@ model User {
   TelegramAccount     TelegramAccount[]
   Transaction         Transaction[]
   WorkSession         WorkSession[]
+  BybitOrderInfo      BybitOrderInfo[]
 }
 
 model WorkSession {
