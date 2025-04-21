@@ -326,9 +326,9 @@ class BybitP2PParser {
   }
 
   /**
-   * Get and process all P2P orders
-   * @param page - Page number (default: 1)
-   * @param size - Items per page (default: 50)
+   * Get and process all P2P orders by fetching multiple pages
+   * @param initialPage - Starting page number (default: 1)
+   * @param pageSize - Items per page (default: 50)
    * @param tokenId - Filter by token (optional)
    * @param side - Filter by side (optional - 0: Buy, 1: Sell)
    * @param status - Filter by status (optional - 50: Completed, etc.)
@@ -337,8 +337,8 @@ class BybitP2PParser {
    * @returns Processed transaction data
    */
   async getAndProcessAllOrders(
-    page: number = 1, 
-    size: number = 50, 
+    initialPage: number = 1, 
+    pageSize: number = 50, 
     tokenId?: string, 
     side?: number[],
     status?: number[],
@@ -346,30 +346,71 @@ class BybitP2PParser {
     endTime?: number
   ): Promise<ProcessResult> {
     try {
-      const response = await this.getAllOrders(page, size, tokenId, side, status, beginTime, endTime);
+      // Максимальное количество страниц для обработки
+      const maxPages = 10;
+      let allTransactions: any[] = [];
+      let totalItemsFound = 0;
       
-      // Check if response is successful
-      if (response.ret_code === 0) {
-        const transactions = response.result?.items || [];
-        console.log(`Found ${transactions.length} P2P orders`);
-        
-        if (transactions.length > 0) {
-          console.log('Sample transaction fields:', Object.keys(transactions[0]).join(', '));
-        }
-        
-        const processedData = this.processTransactions(transactions);
-        
-        return {
-          success: true,
-          data: processedData
-        };
-      } else {
+      // Получаем первую страницу данных
+      console.log(`Запрос страницы ${initialPage} (размер ${pageSize})...`);
+      let response = await this.getAllOrders(initialPage, pageSize, tokenId, side, status, beginTime, endTime);
+      
+      // Проверяем успешность первого запроса
+      if (response.ret_code !== 0) {
         return {
           success: false,
           message: response.ret_msg || 'Failed to fetch P2P orders',
           rawResponse: response
         };
       }
+      
+      // Получаем данные первой страницы
+      const firstPageTransactions = response.result?.items || [];
+      const totalCount = response.result?.count || 0;
+      allTransactions = [...allTransactions, ...firstPageTransactions];
+      totalItemsFound += firstPageTransactions.length;
+      
+      console.log(`Найдено ${firstPageTransactions.length} транзакций на странице ${initialPage} из ${Math.ceil(totalCount / pageSize)} страниц`);
+      
+      // Если есть дополнительные страницы и общее количество известно
+      if (totalCount > pageSize && totalCount > 0) {
+        const totalPages = Math.min(Math.ceil(totalCount / pageSize), maxPages);
+        console.log(`Всего ${totalCount} транзакций, получаем все страницы (максимум ${maxPages})...`);
+        
+        // Получаем оставшиеся страницы данных
+        for (let currentPage = initialPage + 1; currentPage <= totalPages; currentPage++) {
+          console.log(`Запрос страницы ${currentPage} из ${totalPages}...`);
+          response = await this.getAllOrders(currentPage, pageSize, tokenId, side, status, beginTime, endTime);
+          
+          if (response.ret_code === 0) {
+            const pageTransactions = response.result?.items || [];
+            allTransactions = [...allTransactions, ...pageTransactions];
+            totalItemsFound += pageTransactions.length;
+            console.log(`Получено ${pageTransactions.length} транзакций на странице ${currentPage}`);
+          } else {
+            console.error(`Ошибка при получении страницы ${currentPage}: ${response.ret_msg}`);
+            break; // Прерываем цикл при ошибке
+          }
+          
+          // Небольшая пауза между запросами, чтобы избежать ограничения API
+          await new Promise(resolve => setTimeout(resolve, 300));
+        }
+      }
+      
+      console.log(`Всего получено ${totalItemsFound} P2P транзакций из ${totalCount} существующих`);
+      
+      // Если найдены транзакции, показываем образец полей
+      if (allTransactions.length > 0) {
+        console.log('Sample transaction fields:', Object.keys(allTransactions[0]).join(', '));
+      }
+      
+      // Обрабатываем все полученные транзакции
+      const processedData = this.processTransactions(allTransactions);
+      
+      return {
+        success: true,
+        data: processedData
+      };
     } catch (error: any) {
       return {
         success: false,

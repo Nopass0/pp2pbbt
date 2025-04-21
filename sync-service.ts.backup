@@ -461,129 +461,73 @@ export class BybitSyncService {
             
             console.log(`Найдено ${cabinets.length} аккаунтов BybitCabinet для синхронизации`);
             this.log(`Начало синхронизации для ${cabinets.length} аккаунтов BybitCabinet`);
-            
-            // Синхронизируем каждый кабинет последовательно
-            for (const cabinet of cabinets) {
-                try {
-                    await this.syncCabinetTransactions(cabinet);
-                    // Небольшая пауза между синхронизациями разных кабинетов
-                    await this.sleep(1000);
-                } catch (error: any) {
-                    this.logError(`Ошибка при синхронизации кабинета ${cabinet.id}: ${error.message}`);
-                }
-            }
-            
-            this.log(`Завершена синхронизация аккаунтов BybitCabinet`);
-            console.log('Синхронизация аккаунтов BybitCabinet завершена');
-            
-        } catch (error: any) {
-            this.logError(`Ошибка при синхронизации аккаунтов BybitCabinet: ${error.message}`);
-        }
-    }
-    
-    /**
-     * Синхронизация транзакций для одного аккаунта BybitCabinet
-     */
-    private async syncCabinetTransactions(cabinet: any): Promise<void> {
-        console.log(`Синхронизация транзакций для кабинета ${cabinet.id} (${cabinet.bybitEmail})`);
         
-        try {
-            // Проверка наличия API токенов
-            if (!cabinet.bybitApiToken || !cabinet.bybitApiSecret) {
-                this.logError(`Отсутствуют API ключи для кабинета ${cabinet.id} (${cabinet.bybitEmail})`);
-                await this.updateCabinetSyncStatus(cabinet.id, 'ERROR: Отсутствуют API ключи');
-                return;
-            }
-            
-            // Создаем экземпляр парсера Bybit
-            const parser = new BybitP2PParser(cabinet.bybitApiToken, cabinet.bybitApiSecret);
-            
-            // Синхронизируем время с сервером Bybit
-            await parser.syncTime();
-            
-            // Используем фиксированный диапазон дат для решения проблемы с временными метками
-            // Задаем вручную диапазон за последние 3 дня
-            
-            // Получаем текущую дату
-            const now = new Date();
-            const year = now.getFullYear();
-            const month = now.getMonth();
-            const day = now.getDate();
-            
-            // Создаем объекты даты для начала и конца периода
-            const endDate = new Date(year, month, day); // сегодня в 00:00:00
-            const beginDate = new Date(year, month, day - 3); // 3 дня назад в 00:00:00
-            
-            // Преобразуем в UNIX время в миллисекундах
-            const apiBeginTime = beginDate.getTime();
-            const apiEndTime = endDate.getTime() + (86400 * 1000); // +86400000 = + 24 часа (до конца дня)
-            
-            // Логируем реальные даты для отладки
-            console.log(`Период синхронизации: ${beginDate.toISOString()} - ${endDate.toISOString()} (+24 часа)`);
-            console.log(`Даты в формате UNIX (миллисекунды): beginTime=${apiBeginTime}, endTime=${apiEndTime}`);
-            
-            // Дополнительная проверка, что даты в адекватном диапазоне (2020-2025 годы)
-            const minTimestamp = new Date('2020-01-01').getTime();
-            const maxTimestamp = new Date('2025-12-31').getTime();
-            
-            if (apiBeginTime < minTimestamp || apiBeginTime > maxTimestamp) {
-                this.logError(`Недопустимый apiBeginTime: ${apiBeginTime}, выходит за рамки 2020-2025 годов`);
-                return; // Прерываем выполнение, чтобы не отправлять некорректные запросы к API
-            }
-            
-            if (apiEndTime < minTimestamp || apiEndTime > maxTimestamp) {
-                this.logError(`Недопустимый apiEndTime: ${apiEndTime}, выходит за рамки 2020-2025 годов`);
-                return; // Прерываем выполнение
-            }
-            
-            // Эти строки дублируются выше, поэтому удаляем их
-            
-            // Вывод параметров для отладки
-            console.log(`Parameters for P2P request: ${JSON.stringify({page: 1, size: 50, beginTime: apiBeginTime, endTime: apiEndTime})}`);
-            
-            // Получаем и обрабатываем все заявки P2P для указанного периода
-            // Обрабатываем больше страниц для лучшего покрытия данных
-            const result = await parser.getAndProcessAllOrders(1, 10, undefined, undefined, undefined, apiBeginTime, apiEndTime);
-            
-            if (!result.success || !result.data) {
-                this.logError(`Ошибка при получении транзакций для кабинета ${cabinet.id}: ${result.message || 'Неизвестная ошибка'}`);
-                await this.updateCabinetSyncStatus(cabinet.id, `ERROR: ${result.message || 'Ошибка получения данных'}`);
-                return;
-            }
-            
-            // Получаем массив транзакций
-            const transactions = result.data.transactions;
-            const count = transactions.length;
-            console.log(`Получено ${count} транзакций для кабинета ${cabinet.id}`);
-            
-            // Если нет транзакций, обновляем только статус и время синхронизации
-            if (count === 0) {
-                await this.updateCabinetSyncStatus(cabinet.id, 'SUCCESS: Нет новых транзакций');
-                return;
-            }
-            
-            // Фильтруем транзакции, оставляя только завершенные (COMPLETED, статус 50 или 30)
-            const completedTransactions = transactions.filter(tx => tx.status === 50 || tx.status === 30);
-            console.log(`Отфильтровано ${completedTransactions.length} завершенных транзакций из ${transactions.length} общих`);
-            
-            // Обрабатываем только завершенные транзакции
-            for (const tx of completedTransactions) {
-                // Преобразуем формат данных для сохранения в БД
-                const dbRecord = this.transformCabinetTransactionToDbFormat(tx, cabinet.id);
+        // Указываем статус 50 (Completed) для фильтрации при запросе к API
+        const completedStatus = [50]; // 50 = Completed в API Bybit
+        
+        // Объявляем переменную для хранения транзакций
+        let allCompletedTransactions: any[] = [];
+        
+        // Стратегия 1: Запрос с параметрами времени за последние 30 дней
+        this.log(`Кабинет ${cabinet.id}: Стратегия 1 - запрос с параметрами времени`);
+        
+        // Получаем текущую дату
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = now.getMonth();
+        const day = now.getDate();
+        
+        // Создаем объекты даты для начала и конца периода
+        const endDate = new Date(year, month, day); // сегодня в 00:00:00
+        const beginDate = new Date(year, month, day - 30); // 30 дней назад в 00:00:00
+        
+        // Преобразуем в UNIX время в секундах (не в миллисекундах)
+        const apiBeginTime = Math.floor(beginDate.getTime() / 1000);
+        const apiEndTime = Math.floor(endDate.getTime() / 1000) + 86400; // +86400 = + 24 часа (до конца дня)
+        
+        // Логируем реальные даты для отладки
+        console.log(`Период синхронизации: ${beginDate.toISOString()} - ${endDate.toISOString()} (+24 часа)`);
+        console.log(`Даты в формате UNIX (секунды): beginTime=${apiBeginTime}, endTime=${apiEndTime}`);
+        
+        // Дополнительная проверка, что даты в адекватном диапазоне (2015-2025 годы)
+        const minTimestamp = new Date('2015-01-01').getTime() / 1000;
+        const maxTimestamp = new Date('2025-12-31').getTime() / 1000;
+        
+        if (apiBeginTime < minTimestamp || apiBeginTime > maxTimestamp) {
+            this.logError(`Недопустимый apiBeginTime: ${apiBeginTime}, выходит за рамки 2015-2025 годов`);
+            await this.updateCabinetSyncStatus(cabinet.id, 'ERROR: Недопустимый диапазон дат');
+            return; // Прерываем выполнение, чтобы не отправлять некорректные запросы к API
+        }
+        
+        if (apiEndTime < minTimestamp || apiEndTime > maxTimestamp) {
+            this.logError(`Недопустимый apiEndTime: ${apiEndTime}, выходит за рамки 2015-2025 годов`);
+            await this.updateCabinetSyncStatus(cabinet.id, 'ERROR: Недопустимый диапазон дат');
+            return; // Прерываем выполнение
+        }
+        
+        // Запрашиваем последние 10 страниц транзакций
+        let hasSuccess = false;
+        
+        for (let page = 1; page <= 10; page++) {
+            try {
+                console.log(`Кабинет ${cabinet.id}: Запрос страницы ${page} (размер 20)`);
+                const result = await parser.getAndProcessAllOrders(
+                    page, 
+                    20, 
+                    undefined, 
+                    undefined, 
+                    completedStatus,
+                    apiBeginTime,
+                    apiEndTime
+                );
                 
-                // Проверяем, существует ли уже такая транзакция
-                const existingTransaction = await this.prisma.bybitTransactionFromCabinet.findUnique({
-                    where: { orderNo: dbRecord.orderNo }
-                });
-                
-                if (!existingTransaction) {
-                    console.log(`Создание новой записи для транзакции ${dbRecord.orderNo}`);
-                    // Создаем новую запись транзакции
-                    await this.prisma.bybitTransactionFromCabinet.create({
+                if (result.success && result.data && result.data.transactions.length > 0) {
+                    allCompletedTransactions = [...allCompletedTransactions, ...result.data.transactions];
+                    this.log(`Кабинет ${cabinet.id}: Получено ${result.data.transactions.length} транзакций на странице ${page}`);
+                    hasSuccess = true;
                         data: dbRecord
                     });
                 } else {
-                    console.log(`Обновление существующей записи для транзакции ${dbRecord.orderNo}`);
                     // Обновляем существующую запись, если статус изменился
                     if (existingTransaction.status !== dbRecord.status) {
                         await this.prisma.bybitTransactionFromCabinet.update({
@@ -642,37 +586,19 @@ export class BybitSyncService {
             default: status = 'UNKNOWN';
         }
         
-        // Форматируем дату и время из поля createDate
-        // createDate может быть строкой в формате timestamp в миллисекундах
-        let dateTime;
-        try {
-            // Пробуем преобразовать строку в число и создать дату
-            const timestamp = parseInt(transaction.createDate || '0', 10);
-            if (isNaN(timestamp) || timestamp === 0) {
-                dateTime = new Date();
-            } else {
-                dateTime = new Date(timestamp); // Предполагаем, что timestamp уже в миллисекундах
-            }
-        } catch (e) {
-            console.log(`Ошибка при преобразовании даты: ${e.message}`);
-            dateTime = new Date(); // Устанавливаем текущую дату в случае ошибки
-        }
-        
-        // Логируем основные поля для отладки
-        console.log(`ID: ${transaction.id}, Side: ${transaction.side}, Status: ${transaction.status}, CreateDate: ${transaction.createDate}`);
-        console.log(`TokenId: ${transaction.tokenId}, Price: ${transaction.price}, Amount: ${transaction.amount}`);
-        console.log(`Преобразованная дата: ${dateTime.toISOString()}`);
+        // Форматируем дату и время
+        const dateTime = new Date(transaction.createTime);
         
         return {
             orderNo: transaction.id, // Используем id как orderNo
-            counterparty: transaction.targetNickName || 'Unknown',
+            counterparty: transaction.targetNickName,
             status,
-            amount: parseFloat(transaction.notifyTokenQuantity || '0'),
-            asset: transaction.tokenId || 'Unknown',
+            amount: parseFloat(transaction.quantity),
+            asset: transaction.tokenId,
             dateTime,
-            totalPrice: parseFloat(transaction.amount || '0'),
+            totalPrice: parseFloat(transaction.amount),
             type,
-            unitPrice: parseFloat(transaction.price || '0'),
+            unitPrice: parseFloat(transaction.price),
             originalData: transaction,
             cabinetId,
             processed: false,
