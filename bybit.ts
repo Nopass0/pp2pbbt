@@ -347,7 +347,7 @@ class BybitP2PParser {
   ): Promise<ProcessResult> {
     try {
       // Максимальное количество страниц для обработки
-      const maxPages = 10;
+      const maxPages = 100;
       let allTransactions: any[] = [];
       let totalItemsFound = 0;
       
@@ -522,7 +522,7 @@ class BybitP2PParser {
    */
   filterAndExportCompletedOrders(transactions: any[], filepath: string): boolean {
     // Filter for completed orders (status 50)
-    const completedOrders = transactions.filter(tx => tx.status === 50);
+    const completedOrders = transactions.filter(tx => tx.status === 50).filter(tx => tx.type === 'Sell' || tx.type === 'SELL');
     console.log(`Filtered ${completedOrders.length} completed orders from ${transactions.length} total orders`);
     
     if (completedOrders.length === 0) {

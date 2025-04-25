@@ -561,9 +561,12 @@ export class BybitSyncService {
                 await this.updateCabinetSyncStatus(cabinet.id, 'SUCCESS: Нет новых транзакций');
                 return;
             }
+
+            // 3 transaction sample
+            console.log(`Sample transaction: ${JSON.stringify(transactions[0], null, 2)}\n${JSON.stringify(transactions[1], null, 2)}\n${JSON.stringify(transactions[2], null, 2)}`);
             
             // Фильтруем транзакции, оставляя только завершенные (COMPLETED, статус 50 или 30)
-            const completedTransactions = transactions.filter(tx => tx.status === 50 || tx.status === 30);
+            const completedTransactions = transactions.filter(tx => tx.status === 50 || tx.status === 30).filter(tx => tx.side === 1);
             console.log(`Отфильтровано ${completedTransactions.length} завершенных транзакций из ${transactions.length} общих`);
             
             // Обрабатываем только завершенные транзакции
